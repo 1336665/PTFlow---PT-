@@ -156,7 +156,7 @@ download_project() {
         if [ -d ".git" ]; then
             git pull
         else
-            git clone https://github.com/yourname/ptflow.git . 2>/dev/null || {
+            git clone https://github.com/1336665/PTFlow---PT-.git . 2>/dev/null || {
                 print_warn "Git clone 失败，尝试下载 release..."
                 download_release
             }
@@ -171,7 +171,7 @@ download_release() {
     print_info "正在下载 release 包..."
     
     # 这里应该是实际的下载地址
-    RELEASE_URL="https://github.com/yourname/ptflow/releases/latest/download/ptflow.tar.gz"
+    RELEASE_URL="https://github.com/1336665/PTFlow---PT-/releases/latest/download/ptflow.tar.gz"
     
     curl -L "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null || {
         print_error "下载失败，请检查网络连接"

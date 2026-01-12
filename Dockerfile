@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ ./
 
 # 从前端构建阶段复制静态文件
-COPY --from=frontend-builder /app/frontend/dist ./static
+COPY --from=frontend-builder /app/backend/static ./static
 
 # 创建数据目录
 RUN mkdir -p /data

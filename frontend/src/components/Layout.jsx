@@ -6,6 +6,7 @@ import {
   Server, 
   Globe, 
   Rss, 
+  ListChecks,
   Gauge, 
   Settings,
   Menu,
@@ -24,6 +25,7 @@ const navItems = [
   { path: '/instances', icon: Server, label: 'qB实例' },
   { path: '/sites', icon: Globe, label: '站点配置' },
   { path: '/rss', icon: Rss, label: 'RSS订阅' },
+  { path: '/tasks', icon: ListChecks, label: '任务规则' },
   { path: '/limit', icon: Gauge, label: '动态限速' },
   { path: '/settings', icon: Settings, label: '系统设置' },
 ]

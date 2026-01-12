@@ -150,13 +150,18 @@ download_project() {
     print_info "正在下载 PTFlow..."
     
     cd "$INSTALL_DIR"
+
+    if [ -f docker-compose.yml ] || [ -f docker-compose.yaml ]; then
+        print_msg "检测到项目文件已存在，跳过下载"
+        return
+    fi
     
     # 如果有 git，使用 git clone
     if command -v git &> /dev/null; then
         if [ -d ".git" ]; then
             git pull
         else
-            git clone https://github.com/yourname/ptflow.git . 2>/dev/null || {
+            git clone https://github.com/1336665/PTFlow---PT-.git . 2>/dev/null || {
                 print_warn "Git clone 失败，尝试下载 release..."
                 download_release
             }
@@ -166,20 +171,76 @@ download_project() {
     fi
 }
 
+# 解压归档（必要时剥离顶层目录）
+extract_archive() {
+    local archive_path="$1"
+    local top_level_count
+
+    top_level_count=$(tar -tzf "$archive_path" | awk -F/ 'NF{print $1}' | sort -u | wc -l)
+
+    if [ "$top_level_count" -eq 1 ]; then
+        tar -xzf "$archive_path" --strip-components=1
+    else
+        tar -xzf "$archive_path"
+    fi
+}
+
+normalize_project_layout() {
+    local compose_path
+    local project_dir
+
+    if [ -f "$INSTALL_DIR/docker-compose.yml" ] || [ -f "$INSTALL_DIR/docker-compose.yaml" ]; then
+        return
+    fi
+
+    compose_path=$(find "$INSTALL_DIR" -maxdepth 2 -type f \( -name docker-compose.yml -o -name docker-compose.yaml \) | head -n 1)
+
+    if [ -z "$compose_path" ]; then
+        return
+    fi
+
+    project_dir=$(dirname "$compose_path")
+
+    if [ "$project_dir" = "$INSTALL_DIR" ]; then
+        return
+    fi
+
+    shopt -s dotglob
+    mv "$project_dir"/* "$INSTALL_DIR"/
+    shopt -u dotglob
+    rmdir "$project_dir" 2>/dev/null || true
+}
+
 # 下载 release 包
 download_release() {
     print_info "正在下载 release 包..."
     
     # 这里应该是实际的下载地址
-    RELEASE_URL="https://github.com/yourname/ptflow/releases/latest/download/ptflow.tar.gz"
+    RELEASE_URL="https://github.com/1336665/PTFlow---PT-/releases/latest/download/ptflow.tar.gz"
+    ARCHIVE_MAIN_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/main.tar.gz"
+    ARCHIVE_MASTER_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/master.tar.gz"
     
-    curl -L "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null || {
+    if curl -fL "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null; then
+        extract_archive ptflow.tar.gz
+        rm ptflow.tar.gz
+        return
+    fi
+    
+    print_warn "Release 下载失败，尝试下载 main 分支源码归档..."
+    if curl -fL "$ARCHIVE_MAIN_URL" -o ptflow.tar.gz 2>/dev/null; then
+        extract_archive ptflow.tar.gz
+        rm ptflow.tar.gz
+        return
+    fi
+    
+    print_warn "main 分支归档下载失败，尝试下载 master 分支源码归档..."
+    curl -fL "$ARCHIVE_MASTER_URL" -o ptflow.tar.gz 2>/dev/null || {
         print_error "下载失败，请检查网络连接"
         print_info "您也可以手动下载项目到 $INSTALL_DIR"
         exit 1
     }
     
-    tar -xzf ptflow.tar.gz
+    extract_archive ptflow.tar.gz
     rm ptflow.tar.gz
 }
 
@@ -205,6 +266,13 @@ start_service() {
     print_info "正在启动 PTFlow..."
     
     cd "$INSTALL_DIR"
+
+    normalize_project_layout
+    
+    if [ ! -f docker-compose.yml ] && [ ! -f docker-compose.yaml ]; then
+        print_error "未找到 docker-compose 配置文件，请确认项目已完整下载到 $INSTALL_DIR"
+        exit 1
+    fi
     
     # 使用 docker compose 或 docker-compose
     if docker compose version &> /dev/null; then
@@ -318,7 +386,7 @@ main() {
     install_docker
     install_docker_compose
     create_install_dir
-    # download_project  # 如果是从 GitHub 安装，取消注释
+    download_project
     configure_env
     start_service
     create_systemd_service

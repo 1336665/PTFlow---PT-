@@ -219,6 +219,9 @@ function DeleteTaskCard({ task, rules, instanceName, onEdit, onDelete, onAddRule
                       {rule.include_tags ? ` / ${rule.include_tags}` : ''}
                     </p>
                   )}
+                  {rule.conditions_json && (
+                    <p className="text-xs text-blue-300">自定义条件: 已配置</p>
+                  )}
                   {rule.delete_files && (
                     <p className="text-xs text-red-400">删除文件</p>
                   )}
@@ -747,6 +750,7 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
     exclude_categories: '',
     include_tags: '',
     exclude_tags: '',
+    conditions_json: '',
     delete_files: false
   })
   const [loading, setLoading] = useState(false)
@@ -764,6 +768,7 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
         exclude_categories: rule.exclude_categories || '',
         include_tags: rule.include_tags || '',
         exclude_tags: rule.exclude_tags || '',
+        conditions_json: rule.conditions_json || '',
         delete_files: rule.delete_files
       })
     } else {
@@ -777,6 +782,7 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
         exclude_categories: '',
         include_tags: '',
         exclude_tags: '',
+        conditions_json: '',
         delete_files: false
       })
     }
@@ -798,7 +804,8 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
       min_ratio: form.min_ratio === '' ? null : parseFloat(form.min_ratio),
       min_seeding_hours: form.min_seeding_hours === '' ? null : parseFloat(form.min_seeding_hours),
       min_uploaded_gb: form.min_uploaded_gb === '' ? null : parseFloat(form.min_uploaded_gb),
-      max_size_gb: form.max_size_gb === '' ? null : parseFloat(form.max_size_gb)
+      max_size_gb: form.max_size_gb === '' ? null : parseFloat(form.max_size_gb),
+      conditions_json: form.conditions_json.trim() === '' ? null : form.conditions_json.trim()
     }
     const result = await onSubmit(payload, rule?.id)
     setLoading(false)
@@ -900,6 +907,17 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
             onChange={(e) => setForm({ ...form, exclude_tags: e.target.value })}
             className="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-xl text-dark-100"
           />
+        </div>
+        <div>
+          <label className="block text-sm text-dark-400 mb-2">自定义条件(JSON)</label>
+          <textarea
+            rows="4"
+            value={form.conditions_json}
+            onChange={(e) => setForm({ ...form, conditions_json: e.target.value })}
+            className="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-xl text-dark-100"
+            placeholder='[{"field":"ratio","op":">=","value":1},{"field":"seeding_hours","op":">=","value":24}]'
+          />
+          <p className="text-xs text-dark-500 mt-1">支持字段：ratio、seeding_hours、uploaded_gb、size_gb、category、tags、name、tracker、state、progress。</p>
         </div>
         <label className="flex items-center gap-2 cursor-pointer">
           <input

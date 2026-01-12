@@ -172,14 +172,22 @@ download_release() {
     
     # 这里应该是实际的下载地址
     RELEASE_URL="https://github.com/1336665/PTFlow---PT-/releases/latest/download/ptflow.tar.gz"
+    ARCHIVE_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/main.tar.gz"
     
-    curl -L "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null || {
+    if curl -fL "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null; then
+        tar -xzf ptflow.tar.gz
+        rm ptflow.tar.gz
+        return
+    fi
+    
+    print_warn "Release 下载失败，尝试下载源码归档..."
+    curl -fL "$ARCHIVE_URL" -o ptflow.tar.gz 2>/dev/null || {
         print_error "下载失败，请检查网络连接"
         print_info "您也可以手动下载项目到 $INSTALL_DIR"
         exit 1
     }
     
-    tar -xzf ptflow.tar.gz
+    tar -xzf ptflow.tar.gz --strip-components=1
     rm ptflow.tar.gz
 }
 
@@ -205,6 +213,11 @@ start_service() {
     print_info "正在启动 PTFlow..."
     
     cd "$INSTALL_DIR"
+    
+    if [ ! -f docker-compose.yml ] && [ ! -f docker-compose.yaml ]; then
+        print_error "未找到 docker-compose 配置文件，请确认项目已完整下载到 $INSTALL_DIR"
+        exit 1
+    fi
     
     # 使用 docker compose 或 docker-compose
     if docker compose version &> /dev/null; then

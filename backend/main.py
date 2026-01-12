@@ -542,10 +542,16 @@ class Database:
             exclude_categories TEXT,
             include_tags TEXT,
             exclude_tags TEXT,
+            conditions_json TEXT,
             delete_files INTEGER DEFAULT 0,
             created_at REAL,
             FOREIGN KEY (task_id) REFERENCES delete_tasks(id)
         )''')
+
+        try:
+            c.execute('ALTER TABLE delete_task_rules ADD COLUMN conditions_json TEXT')
+        except sqlite3.OperationalError:
+            pass
         
         # 种子状态表
         c.execute('''CREATE TABLE IF NOT EXISTS torrent_states (
@@ -733,6 +739,7 @@ class DeleteTaskRuleCreate(BaseModel):
     exclude_categories: Optional[str] = None
     include_tags: Optional[str] = None
     exclude_tags: Optional[str] = None
+    conditions_json: Optional[str] = None
     delete_files: bool = False
 
 class DeleteTaskRuleUpdate(BaseModel):
@@ -745,6 +752,7 @@ class DeleteTaskRuleUpdate(BaseModel):
     exclude_categories: Optional[str] = None
     include_tags: Optional[str] = None
     exclude_tags: Optional[str] = None
+    conditions_json: Optional[str] = None
     delete_files: Optional[bool] = None
 
 class TorrentAction(BaseModel):
@@ -1551,7 +1559,7 @@ class DeleteManager:
         conn = db.get_conn()
         c = conn.cursor()
         c.execute('''SELECT id, name, min_ratio, min_seeding_hours, min_uploaded_gb, max_size_gb,
-                    include_categories, exclude_categories, include_tags, exclude_tags, delete_files
+                    include_categories, exclude_categories, include_tags, exclude_tags, conditions_json, delete_files
                     FROM delete_task_rules WHERE task_id = ?''', (task_id,))
         rules = c.fetchall()
         conn.close()
@@ -1559,7 +1567,8 @@ class DeleteManager:
         torrents = qb_manager.get_torrents(qb_id)
         for rule in rules:
             (rule_id, name, min_ratio, min_hours, min_uploaded_gb, max_size_gb,
-             include_categories, exclude_categories, include_tags, exclude_tags, delete_files) = rule
+             include_categories, exclude_categories, include_tags, exclude_tags,
+             conditions_json, delete_files) = rule
             for torrent in torrents:
                 if not self._match_delete_rule(
                     torrent,
@@ -1570,7 +1579,8 @@ class DeleteManager:
                     include_categories,
                     exclude_categories,
                     include_tags,
-                    exclude_tags
+                    exclude_tags,
+                    conditions_json
                 ):
                     continue
                 qb_manager.torrent_action(
@@ -1588,7 +1598,10 @@ class DeleteManager:
     def _match_delete_rule(self, torrent: dict, min_ratio: float, min_hours: float,
                            min_uploaded_gb: float, max_size_gb: float,
                            include_categories: str, exclude_categories: str,
-                           include_tags: str, exclude_tags: str) -> bool:
+                           include_tags: str, exclude_tags: str,
+                           conditions_json: str) -> bool:
+        if conditions_json and not self._match_custom_conditions(torrent, conditions_json):
+            return False
         if min_ratio is not None and torrent.get('ratio', 0) < min_ratio:
             return False
 
@@ -1628,6 +1641,93 @@ class DeleteManager:
                 return False
 
         return True
+
+    def _match_custom_conditions(self, torrent: dict, conditions_json: str) -> bool:
+        try:
+            conditions = json.loads(conditions_json)
+        except json.JSONDecodeError:
+            return False
+
+        if not isinstance(conditions, list):
+            return False
+
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                return False
+            field = condition.get('field')
+            op = condition.get('op')
+            value = condition.get('value')
+            if not field or not op:
+                return False
+            if not self._evaluate_condition(torrent, field, op, value):
+                return False
+        return True
+
+    def _evaluate_condition(self, torrent: dict, field: str, op: str, value) -> bool:
+        field_value = self._get_torrent_field_value(torrent, field)
+        if field_value is None:
+            return False
+
+        if op in ('contains', 'not_contains'):
+            text = str(field_value)
+            target = str(value or '')
+            matched = target in text
+            return matched if op == 'contains' else not matched
+
+        if op == 'regex':
+            try:
+                return re.search(str(value), str(field_value)) is not None
+            except re.error:
+                return False
+
+        if isinstance(field_value, (int, float)) and isinstance(value, (int, float)):
+            return self._compare_numbers(field_value, op, value)
+
+        if op in ('==', '!='):
+            return field_value == value if op == '==' else field_value != value
+
+        if op in ('in', 'not_in'):
+            items = {str(v).strip() for v in str(value or '').split(',') if str(v).strip()}
+            matched = str(field_value) in items
+            return matched if op == 'in' else not matched
+
+        if op in ('has_tag', 'not_tag'):
+            tags = {t.strip() for t in str(field_value or '').split(',') if t.strip()}
+            target = str(value or '').strip()
+            matched = target in tags
+            return matched if op == 'has_tag' else not matched
+
+        return False
+
+    def _get_torrent_field_value(self, torrent: dict, field: str):
+        mapping = {
+            'ratio': torrent.get('ratio', 0),
+            'seeding_hours': (torrent.get('seeding_time', 0) or 0) / 3600,
+            'uploaded_gb': (torrent.get('uploaded', 0) or 0) / (1024 * 1024 * 1024),
+            'size_gb': (torrent.get('size', 0) or 0) / (1024 * 1024 * 1024),
+            'category': torrent.get('category'),
+            'tags': torrent.get('tags', ''),
+            'name': torrent.get('name'),
+            'tracker': torrent.get('tracker'),
+            'state': torrent.get('state'),
+            'progress': torrent.get('progress', 0)
+        }
+        return mapping.get(field)
+
+    def _compare_numbers(self, left: float, op: str, right: float) -> bool:
+        if op == '>':
+            return left > right
+        if op == '>=':
+            return left >= right
+        if op == '<':
+            return left < right
+        if op == '<=':
+            return left <= right
+        if op == '==':
+            return left == right
+        if op == '!=':
+            return left != right
+        return False
 
 
 delete_manager = DeleteManager()
@@ -2329,7 +2429,7 @@ async def get_delete_rules(task_id: int, username: str = Depends(verify_token)):
     conn = db.get_conn()
     c = conn.cursor()
     c.execute('''SELECT id, name, min_ratio, min_seeding_hours, min_uploaded_gb, max_size_gb,
-                include_categories, exclude_categories, include_tags, exclude_tags, delete_files, created_at
+                include_categories, exclude_categories, include_tags, exclude_tags, conditions_json, delete_files, created_at
                 FROM delete_task_rules WHERE task_id = ?''', (task_id,))
     rows = c.fetchall()
     conn.close()
@@ -2344,8 +2444,9 @@ async def get_delete_rules(task_id: int, username: str = Depends(verify_token)):
         'exclude_categories': r[7],
         'include_tags': r[8],
         'exclude_tags': r[9],
-        'delete_files': bool(r[10]),
-        'created_at': r[11]
+        'conditions_json': r[10],
+        'delete_files': bool(r[11]),
+        'created_at': r[12]
     } for r in rows]
 
 
@@ -2355,11 +2456,11 @@ async def create_delete_rule(task_id: int, req: DeleteTaskRuleCreate, username: 
     c = conn.cursor()
     c.execute('''INSERT INTO delete_task_rules (task_id, name, min_ratio, min_seeding_hours, min_uploaded_gb,
                 max_size_gb, include_categories, exclude_categories, include_tags, exclude_tags,
-                delete_files, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                conditions_json, delete_files, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (task_id, req.name, req.min_ratio, req.min_seeding_hours, req.min_uploaded_gb,
                req.max_size_gb, req.include_categories, req.exclude_categories, req.include_tags,
-               req.exclude_tags, 1 if req.delete_files else 0, time.time()))
+               req.exclude_tags, req.conditions_json, 1 if req.delete_files else 0, time.time()))
     rule_id = c.lastrowid
     conn.commit()
     conn.close()
@@ -2503,6 +2604,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # 静态文件服务 (前端)
+if os.path.exists("static"):
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith(("api", "ws")):
+            raise HTTPException(404, "Not Found")
+        index_path = os.path.join("static", "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(404, "Not Found")
+
 if os.path.exists("static"):
     app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

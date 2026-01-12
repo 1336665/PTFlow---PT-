@@ -2610,6 +2610,9 @@ if os.path.exists("static"):
         if full_path.startswith(("api", "ws")):
             raise HTTPException(404, "Not Found")
         index_path = os.path.join("static", "index.html")
+        asset_path = os.path.join("static", full_path)
+        if full_path and os.path.exists(asset_path):
+            return FileResponse(asset_path)
         if os.path.exists(index_path):
             return FileResponse(index_path)
         raise HTTPException(404, "Not Found")

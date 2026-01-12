@@ -471,6 +471,87 @@ class Database:
             FOREIGN KEY (site_id) REFERENCES sites(id),
             FOREIGN KEY (qb_instance_id) REFERENCES qb_instances(id)
         )''')
+
+        # RSS任务表
+        c.execute('''CREATE TABLE IF NOT EXISTS rss_tasks (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            url TEXT NOT NULL,
+            qb_instance_id INTEGER NOT NULL,
+            save_path TEXT,
+            category TEXT,
+            tags TEXT,
+            paused INTEGER DEFAULT 0,
+            interval_minutes INTEGER DEFAULT 10,
+            enabled INTEGER DEFAULT 1,
+            last_run REAL,
+            created_at REAL,
+            FOREIGN KEY (qb_instance_id) REFERENCES qb_instances(id)
+        )''')
+
+        # RSS规则表
+        c.execute('''CREATE TABLE IF NOT EXISTS rss_task_rules (
+            id INTEGER PRIMARY KEY,
+            task_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            include_keywords TEXT,
+            exclude_keywords TEXT,
+            save_path TEXT,
+            category TEXT,
+            tags TEXT,
+            paused INTEGER DEFAULT 0,
+            created_at REAL,
+            FOREIGN KEY (task_id) REFERENCES rss_tasks(id)
+        )''')
+
+        # RSS任务下载历史
+        c.execute('''CREATE TABLE IF NOT EXISTS rss_task_history (
+            id INTEGER PRIMARY KEY,
+            task_id INTEGER NOT NULL,
+            rule_id INTEGER,
+            entry_hash TEXT,
+            name TEXT,
+            link TEXT,
+            downloaded_at REAL,
+            FOREIGN KEY (task_id) REFERENCES rss_tasks(id),
+            FOREIGN KEY (rule_id) REFERENCES rss_task_rules(id)
+        )''')
+
+        # 删种任务表
+        c.execute('''CREATE TABLE IF NOT EXISTS delete_tasks (
+            id INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            qb_instance_id INTEGER NOT NULL,
+            interval_minutes INTEGER DEFAULT 60,
+            enabled INTEGER DEFAULT 1,
+            last_run REAL,
+            created_at REAL,
+            FOREIGN KEY (qb_instance_id) REFERENCES qb_instances(id)
+        )''')
+
+        # 删种规则表
+        c.execute('''CREATE TABLE IF NOT EXISTS delete_task_rules (
+            id INTEGER PRIMARY KEY,
+            task_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            min_ratio REAL,
+            min_seeding_hours REAL,
+            min_uploaded_gb REAL,
+            max_size_gb REAL,
+            include_categories TEXT,
+            exclude_categories TEXT,
+            include_tags TEXT,
+            exclude_tags TEXT,
+            conditions_json TEXT,
+            delete_files INTEGER DEFAULT 0,
+            created_at REAL,
+            FOREIGN KEY (task_id) REFERENCES delete_tasks(id)
+        )''')
+
+        try:
+            c.execute('ALTER TABLE delete_task_rules ADD COLUMN conditions_json TEXT')
+        except sqlite3.OperationalError:
+            pass
         
         # 种子状态表
         c.execute('''CREATE TABLE IF NOT EXISTS torrent_states (
@@ -596,6 +677,84 @@ class RSSFeedUpdate(BaseModel):
     filter_include: Optional[str] = None
     filter_exclude: Optional[str] = None
 
+class RSSTaskCreate(BaseModel):
+    name: str
+    url: str
+    qb_instance_id: int
+    save_path: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    paused: bool = False
+    interval_minutes: int = 10
+    enabled: bool = True
+
+class RSSTaskUpdate(BaseModel):
+    name: Optional[str] = None
+    url: Optional[str] = None
+    qb_instance_id: Optional[int] = None
+    save_path: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    paused: Optional[bool] = None
+    interval_minutes: Optional[int] = None
+    enabled: Optional[bool] = None
+
+class RSSTaskRuleCreate(BaseModel):
+    name: str
+    include_keywords: Optional[str] = None
+    exclude_keywords: Optional[str] = None
+    save_path: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    paused: bool = False
+
+class RSSTaskRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    include_keywords: Optional[str] = None
+    exclude_keywords: Optional[str] = None
+    save_path: Optional[str] = None
+    category: Optional[str] = None
+    tags: Optional[str] = None
+    paused: Optional[bool] = None
+
+class DeleteTaskCreate(BaseModel):
+    name: str
+    qb_instance_id: int
+    interval_minutes: int = 60
+    enabled: bool = True
+
+class DeleteTaskUpdate(BaseModel):
+    name: Optional[str] = None
+    qb_instance_id: Optional[int] = None
+    interval_minutes: Optional[int] = None
+    enabled: Optional[bool] = None
+
+class DeleteTaskRuleCreate(BaseModel):
+    name: str
+    min_ratio: Optional[float] = None
+    min_seeding_hours: Optional[float] = None
+    min_uploaded_gb: Optional[float] = None
+    max_size_gb: Optional[float] = None
+    include_categories: Optional[str] = None
+    exclude_categories: Optional[str] = None
+    include_tags: Optional[str] = None
+    exclude_tags: Optional[str] = None
+    conditions_json: Optional[str] = None
+    delete_files: bool = False
+
+class DeleteTaskRuleUpdate(BaseModel):
+    name: Optional[str] = None
+    min_ratio: Optional[float] = None
+    min_seeding_hours: Optional[float] = None
+    min_uploaded_gb: Optional[float] = None
+    max_size_gb: Optional[float] = None
+    include_categories: Optional[str] = None
+    exclude_categories: Optional[str] = None
+    include_tags: Optional[str] = None
+    exclude_tags: Optional[str] = None
+    conditions_json: Optional[str] = None
+    delete_files: Optional[bool] = None
+
 class TorrentAction(BaseModel):
     hashes: List[str]
     action: str  # pause, resume, delete, recheck, reannounce
@@ -605,6 +764,7 @@ class AddTorrentRequest(BaseModel):
     urls: Optional[str] = None
     save_path: Optional[str] = None
     category: Optional[str] = None
+    tags: Optional[str] = None
     paused: bool = False
 
 class ChangePasswordRequest(BaseModel):
@@ -680,6 +840,8 @@ class QBManager:
             'eta': t.eta,
             'added_on': t.added_on,
             'completed_on': t.completion_on,
+            'seeding_time': getattr(t, 'seeding_time', 0),
+            'time_active': getattr(t, 'time_active', 0),
             'tracker': t.tracker,
             'save_path': t.save_path,
             'category': t.category,
@@ -712,15 +874,28 @@ class QBManager:
             return False
     
     def add_torrent(self, instance_id: int, urls: str = None, torrent_files: bytes = None,
-                    save_path: str = None, category: str = None, paused: bool = False) -> bool:
+                    save_path: str = None, category: str = None, tags: str = None,
+                    paused: bool = False) -> bool:
         client = self.get_client(instance_id)
         if not client:
             return False
         try:
             if urls:
-                client.torrents_add(urls=urls, save_path=save_path, category=category, is_paused=paused)
+                client.torrents_add(
+                    urls=urls,
+                    save_path=save_path,
+                    category=category,
+                    tags=tags,
+                    is_paused=paused
+                )
             elif torrent_files:
-                client.torrents_add(torrent_files=torrent_files, save_path=save_path, category=category, is_paused=paused)
+                client.torrents_add(
+                    torrent_files=torrent_files,
+                    save_path=save_path,
+                    category=category,
+                    tags=tags,
+                    is_paused=paused
+                )
             return True
         except Exception as e:
             logger.error(f"添加种子失败: {e}")
@@ -1138,6 +1313,7 @@ class RSSManager:
     def _run_loop(self):
         while not self._stop_event.is_set():
             try:
+                self._check_tasks()
                 self._check_feeds()
             except Exception as e:
                 logger.error(f"RSS检查异常: {e}")
@@ -1157,6 +1333,103 @@ class RSSManager:
                 self._process_feed(feed_id, url, qb_id, save_path, category, filter_inc, filter_exc)
             except Exception as e:
                 logger.error(f"处理RSS {name} 失败: {e}")
+
+    def _check_tasks(self):
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute('''SELECT id, name, url, qb_instance_id, save_path, category, tags,
+                    paused, interval_minutes, enabled, last_run
+                    FROM rss_tasks WHERE enabled = 1''')
+        tasks = c.fetchall()
+        conn.close()
+
+        for task in tasks:
+            (task_id, name, url, qb_id, save_path, category, tags,
+             paused, interval_minutes, enabled, last_run) = task
+            if last_run and interval_minutes:
+                if time.time() - last_run < interval_minutes * 60:
+                    continue
+            try:
+                self._process_task(task_id, url, qb_id, save_path, category, tags, paused)
+            except Exception as e:
+                logger.error(f"处理RSS任务 {name} 失败: {e}")
+
+    def _process_task(self, task_id: int, url: str, qb_id: int, save_path: str,
+                      category: str, tags: str, paused: int):
+        try:
+            feed = feedparser.parse(url)
+        except:
+            return
+
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute('''SELECT id, name, include_keywords, exclude_keywords, save_path,
+                    category, tags, paused FROM rss_task_rules WHERE task_id = ?''',
+                  (task_id,))
+        rules = c.fetchall()
+
+        for entry in feed.entries[:50]:
+            title = entry.get('title', '')
+            link = entry.get('link', '')
+            if not link:
+                continue
+
+            entry_hash = hashlib.md5(link.encode()).hexdigest()
+            c.execute('SELECT id FROM rss_task_history WHERE task_id = ? AND entry_hash = ?',
+                      (task_id, entry_hash))
+            if c.fetchone():
+                continue
+
+            matched_rule = None
+            if rules:
+                for rule in rules:
+                    rule_id, rule_name, inc, exc, rule_save, rule_cat, rule_tags, rule_paused = rule
+                    if self._match_keywords(title, inc, exc):
+                        matched_rule = {
+                            'id': rule_id,
+                            'save_path': rule_save,
+                            'category': rule_cat,
+                            'tags': rule_tags,
+                            'paused': rule_paused
+                        }
+                        break
+                if not matched_rule:
+                    continue
+
+            final_save = matched_rule['save_path'] if matched_rule and matched_rule['save_path'] else save_path
+            final_cat = matched_rule['category'] if matched_rule and matched_rule['category'] else category
+            final_tags = matched_rule['tags'] if matched_rule and matched_rule['tags'] else tags
+            final_paused = bool(matched_rule['paused']) if matched_rule else bool(paused)
+
+            if qb_manager.add_torrent(
+                qb_id,
+                urls=link,
+                save_path=final_save,
+                category=final_cat,
+                tags=final_tags,
+                paused=final_paused
+            ):
+                c.execute('''INSERT INTO rss_task_history
+                          (task_id, rule_id, entry_hash, name, link, downloaded_at)
+                          VALUES (?, ?, ?, ?, ?, ?)''',
+                          (task_id, matched_rule['id'] if matched_rule else None,
+                           entry_hash, title, link, time.time()))
+                logger.info(f"📥 RSS任务添加种子: {title[:50]}")
+
+        c.execute('UPDATE rss_tasks SET last_run = ? WHERE id = ?', (time.time(), task_id))
+        conn.commit()
+        conn.close()
+
+    def _match_keywords(self, title: str, include: str, exclude: str) -> bool:
+        if include:
+            patterns = [p.strip() for p in include.split(',') if p.strip()]
+            if patterns and not any(re.search(p, title, re.I) for p in patterns):
+                return False
+        if exclude:
+            patterns = [p.strip() for p in exclude.split(',') if p.strip()]
+            if patterns and any(re.search(p, title, re.I) for p in patterns):
+                return False
+        return True
     
     def _process_feed(self, feed_id: int, url: str, qb_id: int, save_path: str, 
                       category: str, filter_include: str, filter_exclude: str):
@@ -1230,6 +1503,237 @@ rss_manager = RSSManager()
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# 删种管理器
+# ════════════════════════════════════════════════════════════════════════════════
+
+class DeleteManager:
+    """删种任务管理"""
+
+    def __init__(self):
+        self.running = False
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+
+    def start(self):
+        if self.running:
+            return
+        self.running = True
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run_loop, daemon=True)
+        self._thread.start()
+        logger.info("🧹 删种管理器已启动")
+
+    def stop(self):
+        self.running = False
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=5)
+
+    def _run_loop(self):
+        while not self._stop_event.is_set():
+            try:
+                self._check_tasks()
+            except Exception as e:
+                logger.error(f"删种检查异常: {e}")
+            self._stop_event.wait(300)
+
+    def _check_tasks(self):
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute('''SELECT id, name, qb_instance_id, interval_minutes, enabled, last_run
+                    FROM delete_tasks WHERE enabled = 1''')
+        tasks = c.fetchall()
+        conn.close()
+
+        for task in tasks:
+            task_id, name, qb_id, interval_minutes, enabled, last_run = task
+            if last_run and interval_minutes:
+                if time.time() - last_run < interval_minutes * 60:
+                    continue
+            try:
+                self._process_task(task_id, qb_id)
+            except Exception as e:
+                logger.error(f"处理删种任务 {name} 失败: {e}")
+
+    def _process_task(self, task_id: int, qb_id: int):
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute('''SELECT id, name, min_ratio, min_seeding_hours, min_uploaded_gb, max_size_gb,
+                    include_categories, exclude_categories, include_tags, exclude_tags, conditions_json, delete_files
+                    FROM delete_task_rules WHERE task_id = ?''', (task_id,))
+        rules = c.fetchall()
+        conn.close()
+
+        torrents = qb_manager.get_torrents(qb_id)
+        for rule in rules:
+            (rule_id, name, min_ratio, min_hours, min_uploaded_gb, max_size_gb,
+             include_categories, exclude_categories, include_tags, exclude_tags,
+             conditions_json, delete_files) = rule
+            for torrent in torrents:
+                if not self._match_delete_rule(
+                    torrent,
+                    min_ratio,
+                    min_hours,
+                    min_uploaded_gb,
+                    max_size_gb,
+                    include_categories,
+                    exclude_categories,
+                    include_tags,
+                    exclude_tags,
+                    conditions_json
+                ):
+                    continue
+                qb_manager.torrent_action(
+                    qb_id,
+                    [torrent['hash']],
+                    'delete',
+                    delete_files=bool(delete_files)
+                )
+        conn = db.get_conn()
+        c = conn.cursor()
+        c.execute('UPDATE delete_tasks SET last_run = ? WHERE id = ?', (time.time(), task_id))
+        conn.commit()
+        conn.close()
+
+    def _match_delete_rule(self, torrent: dict, min_ratio: float, min_hours: float,
+                           min_uploaded_gb: float, max_size_gb: float,
+                           include_categories: str, exclude_categories: str,
+                           include_tags: str, exclude_tags: str,
+                           conditions_json: str) -> bool:
+        if conditions_json and not self._match_custom_conditions(torrent, conditions_json):
+            return False
+        if min_ratio is not None and torrent.get('ratio', 0) < min_ratio:
+            return False
+
+        if min_hours is not None:
+            seeding_time = torrent.get('seeding_time', 0)
+            if seeding_time < min_hours * 3600:
+                return False
+
+        if min_uploaded_gb is not None:
+            if torrent.get('uploaded', 0) < min_uploaded_gb * 1024 * 1024 * 1024:
+                return False
+
+        if max_size_gb is not None:
+            if torrent.get('size', 0) > max_size_gb * 1024 * 1024 * 1024:
+                return False
+
+        if include_categories:
+            allowed = {c.strip() for c in include_categories.split(',') if c.strip()}
+            if allowed and torrent.get('category') not in allowed:
+                return False
+
+        if exclude_categories:
+            blocked = {c.strip() for c in exclude_categories.split(',') if c.strip()}
+            if blocked and torrent.get('category') in blocked:
+                return False
+
+        torrent_tags = {t.strip() for t in str(torrent.get('tags') or '').split(',') if t.strip()}
+
+        if include_tags:
+            required = {t.strip() for t in include_tags.split(',') if t.strip()}
+            if required and not torrent_tags.intersection(required):
+                return False
+
+        if exclude_tags:
+            blocked_tags = {t.strip() for t in exclude_tags.split(',') if t.strip()}
+            if blocked_tags and torrent_tags.intersection(blocked_tags):
+                return False
+
+        return True
+
+    def _match_custom_conditions(self, torrent: dict, conditions_json: str) -> bool:
+        try:
+            conditions = json.loads(conditions_json)
+        except json.JSONDecodeError:
+            return False
+
+        if not isinstance(conditions, list):
+            return False
+
+        for condition in conditions:
+            if not isinstance(condition, dict):
+                return False
+            field = condition.get('field')
+            op = condition.get('op')
+            value = condition.get('value')
+            if not field or not op:
+                return False
+            if not self._evaluate_condition(torrent, field, op, value):
+                return False
+        return True
+
+    def _evaluate_condition(self, torrent: dict, field: str, op: str, value) -> bool:
+        field_value = self._get_torrent_field_value(torrent, field)
+        if field_value is None:
+            return False
+
+        if op in ('contains', 'not_contains'):
+            text = str(field_value)
+            target = str(value or '')
+            matched = target in text
+            return matched if op == 'contains' else not matched
+
+        if op == 'regex':
+            try:
+                return re.search(str(value), str(field_value)) is not None
+            except re.error:
+                return False
+
+        if isinstance(field_value, (int, float)) and isinstance(value, (int, float)):
+            return self._compare_numbers(field_value, op, value)
+
+        if op in ('==', '!='):
+            return field_value == value if op == '==' else field_value != value
+
+        if op in ('in', 'not_in'):
+            items = {str(v).strip() for v in str(value or '').split(',') if str(v).strip()}
+            matched = str(field_value) in items
+            return matched if op == 'in' else not matched
+
+        if op in ('has_tag', 'not_tag'):
+            tags = {t.strip() for t in str(field_value or '').split(',') if t.strip()}
+            target = str(value or '').strip()
+            matched = target in tags
+            return matched if op == 'has_tag' else not matched
+
+        return False
+
+    def _get_torrent_field_value(self, torrent: dict, field: str):
+        mapping = {
+            'ratio': torrent.get('ratio', 0),
+            'seeding_hours': (torrent.get('seeding_time', 0) or 0) / 3600,
+            'uploaded_gb': (torrent.get('uploaded', 0) or 0) / (1024 * 1024 * 1024),
+            'size_gb': (torrent.get('size', 0) or 0) / (1024 * 1024 * 1024),
+            'category': torrent.get('category'),
+            'tags': torrent.get('tags', ''),
+            'name': torrent.get('name'),
+            'tracker': torrent.get('tracker'),
+            'state': torrent.get('state'),
+            'progress': torrent.get('progress', 0)
+        }
+        return mapping.get(field)
+
+    def _compare_numbers(self, left: float, op: str, right: float) -> bool:
+        if op == '>':
+            return left > right
+        if op == '>=':
+            return left >= right
+        if op == '<':
+            return left < right
+        if op == '<=':
+            return left <= right
+        if op == '==':
+            return left == right
+        if op == '!=':
+            return left != right
+        return False
+
+
+delete_manager = DeleteManager()
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # WebSocket 管理
 # ════════════════════════════════════════════════════════════════════════════════
 
@@ -1282,6 +1786,7 @@ async def lifespan(app: FastAPI):
     # 启动引擎
     limit_engine.start()
     rss_manager.start()
+    delete_manager.start()
     
     yield
     
@@ -1289,6 +1794,7 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 PTFlow 正在关闭...")
     limit_engine.stop()
     rss_manager.stop()
+    delete_manager.stop()
 
 
 app = FastAPI(title="PTFlow", version=VERSION, lifespan=lifespan)
@@ -1509,6 +2015,7 @@ async def add_torrent(instance_id: int, req: AddTorrentRequest, username: str = 
         urls=req.urls, 
         save_path=req.save_path,
         category=req.category,
+        tags=req.tags,
         paused=req.paused
     )
     return {'success': success}
@@ -1594,6 +2101,172 @@ async def delete_site(site_id: int, username: str = Depends(verify_token)):
     conn.commit()
     conn.close()
     return {'success': True}
+
+
+# RSS任务管理
+@app.get("/api/rss/tasks")
+async def get_rss_tasks(username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''SELECT id, name, url, qb_instance_id, save_path, category, tags,
+                paused, interval_minutes, enabled, last_run, created_at
+                FROM rss_tasks''')
+    rows = c.fetchall()
+    conn.close()
+
+    return [{
+        'id': r[0],
+        'name': r[1],
+        'url': r[2],
+        'qb_instance_id': r[3],
+        'save_path': r[4],
+        'category': r[5],
+        'tags': r[6],
+        'paused': bool(r[7]),
+        'interval_minutes': r[8],
+        'enabled': bool(r[9]),
+        'last_run': r[10],
+        'created_at': r[11]
+    } for r in rows]
+
+
+@app.post("/api/rss/tasks")
+async def create_rss_task(req: RSSTaskCreate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO rss_tasks (name, url, qb_instance_id, save_path, category, tags,
+                paused, interval_minutes, enabled, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (req.name, req.url, req.qb_instance_id, req.save_path, req.category,
+               req.tags, 1 if req.paused else 0, req.interval_minutes,
+               1 if req.enabled else 0, time.time()))
+    task_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return {'id': task_id}
+
+
+@app.put("/api/rss/tasks/{task_id}")
+async def update_rss_task(task_id: int, req: RSSTaskUpdate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    updates = []
+    values = []
+    for field, value in req.dict(exclude_unset=True).items():
+        if value is not None:
+            if field in ('paused', 'enabled'):
+                updates.append(f'{field} = ?')
+                values.append(1 if value else 0)
+            else:
+                updates.append(f'{field} = ?')
+                values.append(value)
+    if updates:
+        values.append(task_id)
+        c.execute(f'UPDATE rss_tasks SET {", ".join(updates)} WHERE id = ?', values)
+        conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.delete("/api/rss/tasks/{task_id}")
+async def delete_rss_task(task_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM rss_task_rules WHERE task_id = ?', (task_id,))
+    c.execute('DELETE FROM rss_tasks WHERE id = ?', (task_id,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.get("/api/rss/tasks/{task_id}/rules")
+async def get_rss_task_rules(task_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''SELECT id, name, include_keywords, exclude_keywords, save_path, category,
+                tags, paused, created_at FROM rss_task_rules WHERE task_id = ?''', (task_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [{
+        'id': r[0],
+        'name': r[1],
+        'include_keywords': r[2],
+        'exclude_keywords': r[3],
+        'save_path': r[4],
+        'category': r[5],
+        'tags': r[6],
+        'paused': bool(r[7]),
+        'created_at': r[8]
+    } for r in rows]
+
+
+@app.post("/api/rss/tasks/{task_id}/rules")
+async def create_rss_task_rule(task_id: int, req: RSSTaskRuleCreate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO rss_task_rules (task_id, name, include_keywords, exclude_keywords,
+                save_path, category, tags, paused, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (task_id, req.name, req.include_keywords, req.exclude_keywords,
+               req.save_path, req.category, req.tags, 1 if req.paused else 0, time.time()))
+    rule_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return {'id': rule_id}
+
+
+@app.put("/api/rss/rules/{rule_id}")
+async def update_rss_task_rule(rule_id: int, req: RSSTaskRuleUpdate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    updates = []
+    values = []
+    for field, value in req.dict(exclude_unset=True).items():
+        if value is not None:
+            if field == 'paused':
+                updates.append(f'{field} = ?')
+                values.append(1 if value else 0)
+            else:
+                updates.append(f'{field} = ?')
+                values.append(value)
+    if updates:
+        values.append(rule_id)
+        c.execute(f'UPDATE rss_task_rules SET {", ".join(updates)} WHERE id = ?', values)
+        conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.delete("/api/rss/rules/{rule_id}")
+async def delete_rss_task_rule(rule_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM rss_task_rules WHERE id = ?', (rule_id,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.get("/api/rss/tasks/{task_id}/preview")
+async def preview_rss_task(task_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('SELECT url FROM rss_tasks WHERE id = ?', (task_id,))
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return []
+    try:
+        feed = feedparser.parse(row[0])
+        return [{
+            'title': e.get('title', ''),
+            'link': e.get('link', ''),
+            'published': e.get('published', ''),
+            'description': e.get('description', '')[:200] if e.get('description') else ''
+        } for e in feed.entries[:50]]
+    except:
+        return []
 
 
 # RSS管理
@@ -1683,6 +2356,147 @@ async def delete_rss_feed(feed_id: int, username: str = Depends(verify_token)):
 async def preview_rss_feed(feed_id: int, username: str = Depends(verify_token)):
     entries = rss_manager.check_feed_now(feed_id)
     return entries
+
+
+# 删种任务管理
+@app.get("/api/delete/tasks")
+async def get_delete_tasks(username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''SELECT id, name, qb_instance_id, interval_minutes, enabled, last_run, created_at
+                FROM delete_tasks''')
+    rows = c.fetchall()
+    conn.close()
+    return [{
+        'id': r[0],
+        'name': r[1],
+        'qb_instance_id': r[2],
+        'interval_minutes': r[3],
+        'enabled': bool(r[4]),
+        'last_run': r[5],
+        'created_at': r[6]
+    } for r in rows]
+
+
+@app.post("/api/delete/tasks")
+async def create_delete_task(req: DeleteTaskCreate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO delete_tasks (name, qb_instance_id, interval_minutes, enabled, created_at)
+                VALUES (?, ?, ?, ?, ?)''',
+              (req.name, req.qb_instance_id, req.interval_minutes, 1 if req.enabled else 0, time.time()))
+    task_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return {'id': task_id}
+
+
+@app.put("/api/delete/tasks/{task_id}")
+async def update_delete_task(task_id: int, req: DeleteTaskUpdate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    updates = []
+    values = []
+    for field, value in req.dict(exclude_unset=True).items():
+        if value is not None:
+            if field == 'enabled':
+                updates.append(f'{field} = ?')
+                values.append(1 if value else 0)
+            else:
+                updates.append(f'{field} = ?')
+                values.append(value)
+    if updates:
+        values.append(task_id)
+        c.execute(f'UPDATE delete_tasks SET {", ".join(updates)} WHERE id = ?', values)
+        conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.delete("/api/delete/tasks/{task_id}")
+async def delete_delete_task(task_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM delete_task_rules WHERE task_id = ?', (task_id,))
+    c.execute('DELETE FROM delete_tasks WHERE id = ?', (task_id,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.get("/api/delete/tasks/{task_id}/rules")
+async def get_delete_rules(task_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''SELECT id, name, min_ratio, min_seeding_hours, min_uploaded_gb, max_size_gb,
+                include_categories, exclude_categories, include_tags, exclude_tags, conditions_json, delete_files, created_at
+                FROM delete_task_rules WHERE task_id = ?''', (task_id,))
+    rows = c.fetchall()
+    conn.close()
+    return [{
+        'id': r[0],
+        'name': r[1],
+        'min_ratio': r[2],
+        'min_seeding_hours': r[3],
+        'min_uploaded_gb': r[4],
+        'max_size_gb': r[5],
+        'include_categories': r[6],
+        'exclude_categories': r[7],
+        'include_tags': r[8],
+        'exclude_tags': r[9],
+        'conditions_json': r[10],
+        'delete_files': bool(r[11]),
+        'created_at': r[12]
+    } for r in rows]
+
+
+@app.post("/api/delete/tasks/{task_id}/rules")
+async def create_delete_rule(task_id: int, req: DeleteTaskRuleCreate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('''INSERT INTO delete_task_rules (task_id, name, min_ratio, min_seeding_hours, min_uploaded_gb,
+                max_size_gb, include_categories, exclude_categories, include_tags, exclude_tags,
+                conditions_json, delete_files, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (task_id, req.name, req.min_ratio, req.min_seeding_hours, req.min_uploaded_gb,
+               req.max_size_gb, req.include_categories, req.exclude_categories, req.include_tags,
+               req.exclude_tags, req.conditions_json, 1 if req.delete_files else 0, time.time()))
+    rule_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return {'id': rule_id}
+
+
+@app.put("/api/delete/rules/{rule_id}")
+async def update_delete_rule(rule_id: int, req: DeleteTaskRuleUpdate, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    updates = []
+    values = []
+    for field, value in req.dict(exclude_unset=True).items():
+        if value is not None:
+            if field == 'delete_files':
+                updates.append(f'{field} = ?')
+                values.append(1 if value else 0)
+            else:
+                updates.append(f'{field} = ?')
+                values.append(value)
+    if updates:
+        values.append(rule_id)
+        c.execute(f'UPDATE delete_task_rules SET {", ".join(updates)} WHERE id = ?', values)
+        conn.commit()
+    conn.close()
+    return {'success': True}
+
+
+@app.delete("/api/delete/rules/{rule_id}")
+async def delete_delete_rule(rule_id: int, username: str = Depends(verify_token)):
+    conn = db.get_conn()
+    c = conn.cursor()
+    c.execute('DELETE FROM delete_task_rules WHERE id = ?', (rule_id,))
+    conn.commit()
+    conn.close()
+    return {'success': True}
 
 
 # 限速引擎状态
@@ -1790,6 +2604,16 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # 静态文件服务 (前端)
+if os.path.exists("static"):
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith(("api", "ws")):
+            raise HTTPException(404, "Not Found")
+        index_path = os.path.join("static", "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(404, "Not Found")
+
 if os.path.exists("static"):
     app.mount("/", StaticFiles(directory="static", html=True), name="static")
 

@@ -150,6 +150,11 @@ download_project() {
     print_info "正在下载 PTFlow..."
     
     cd "$INSTALL_DIR"
+
+    if [ -f docker-compose.yml ] || [ -f docker-compose.yaml ]; then
+        print_msg "检测到项目文件已存在，跳过下载"
+        return
+    fi
     
     # 如果有 git，使用 git clone
     if command -v git &> /dev/null; then
@@ -178,6 +183,32 @@ extract_archive() {
     else
         tar -xzf "$archive_path"
     fi
+}
+
+normalize_project_layout() {
+    local compose_path
+    local project_dir
+
+    if [ -f "$INSTALL_DIR/docker-compose.yml" ] || [ -f "$INSTALL_DIR/docker-compose.yaml" ]; then
+        return
+    fi
+
+    compose_path=$(find "$INSTALL_DIR" -maxdepth 2 -type f \( -name docker-compose.yml -o -name docker-compose.yaml \) | head -n 1)
+
+    if [ -z "$compose_path" ]; then
+        return
+    fi
+
+    project_dir=$(dirname "$compose_path")
+
+    if [ "$project_dir" = "$INSTALL_DIR" ]; then
+        return
+    fi
+
+    shopt -s dotglob
+    mv "$project_dir"/* "$INSTALL_DIR"/
+    shopt -u dotglob
+    rmdir "$project_dir" 2>/dev/null || true
 }
 
 # 下载 release 包
@@ -235,6 +266,8 @@ start_service() {
     print_info "正在启动 PTFlow..."
     
     cd "$INSTALL_DIR"
+
+    normalize_project_layout
     
     if [ ! -f docker-compose.yml ] && [ ! -f docker-compose.yaml ]; then
         print_error "未找到 docker-compose 配置文件，请确认项目已完整下载到 $INSTALL_DIR"
@@ -353,7 +386,7 @@ main() {
     install_docker
     install_docker_compose
     create_install_dir
-    # download_project  # 如果是从 GitHub 安装，取消注释
+    download_project
     configure_env
     start_service
     create_systemd_service

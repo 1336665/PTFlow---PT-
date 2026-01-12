@@ -166,6 +166,20 @@ download_project() {
     fi
 }
 
+# 解压归档（必要时剥离顶层目录）
+extract_archive() {
+    local archive_path="$1"
+    local top_level_count
+
+    top_level_count=$(tar -tzf "$archive_path" | awk -F/ 'NF{print $1}' | sort -u | wc -l)
+
+    if [ "$top_level_count" -eq 1 ]; then
+        tar -xzf "$archive_path" --strip-components=1
+    else
+        tar -xzf "$archive_path"
+    fi
+}
+
 # 下载 release 包
 download_release() {
     print_info "正在下载 release 包..."
@@ -176,14 +190,14 @@ download_release() {
     ARCHIVE_MASTER_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/master.tar.gz"
     
     if curl -fL "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null; then
-        tar -xzf ptflow.tar.gz
+        extract_archive ptflow.tar.gz
         rm ptflow.tar.gz
         return
     fi
     
     print_warn "Release 下载失败，尝试下载 main 分支源码归档..."
     if curl -fL "$ARCHIVE_MAIN_URL" -o ptflow.tar.gz 2>/dev/null; then
-        tar -xzf ptflow.tar.gz --strip-components=1
+        extract_archive ptflow.tar.gz
         rm ptflow.tar.gz
         return
     fi
@@ -195,7 +209,7 @@ download_release() {
         exit 1
     }
     
-    tar -xzf ptflow.tar.gz --strip-components=1
+    extract_archive ptflow.tar.gz
     rm ptflow.tar.gz
 }
 

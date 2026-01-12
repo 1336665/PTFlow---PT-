@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  ptflow:
+    build: .
+    container_name: ptflow
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ptflow_data:/data
+    environment:
+      - DATABASE_PATH=/data/ptflow.db
+      - JWT_SECRET=${JWT_SECRET:-}
+      - TZ=Asia/Shanghai
+    networks:
+      - ptflow_network
+
+networks:
+  ptflow_network:
+    driver: bridge
+
+volumes:
+  ptflow_data:
+    driver: local

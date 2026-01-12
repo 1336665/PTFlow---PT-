@@ -172,7 +172,8 @@ download_release() {
     
     # 这里应该是实际的下载地址
     RELEASE_URL="https://github.com/1336665/PTFlow---PT-/releases/latest/download/ptflow.tar.gz"
-    ARCHIVE_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/main.tar.gz"
+    ARCHIVE_MAIN_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/main.tar.gz"
+    ARCHIVE_MASTER_URL="https://github.com/1336665/PTFlow---PT-/archive/refs/heads/master.tar.gz"
     
     if curl -fL "$RELEASE_URL" -o ptflow.tar.gz 2>/dev/null; then
         tar -xzf ptflow.tar.gz
@@ -180,8 +181,15 @@ download_release() {
         return
     fi
     
-    print_warn "Release 下载失败，尝试下载源码归档..."
-    curl -fL "$ARCHIVE_URL" -o ptflow.tar.gz 2>/dev/null || {
+    print_warn "Release 下载失败，尝试下载 main 分支源码归档..."
+    if curl -fL "$ARCHIVE_MAIN_URL" -o ptflow.tar.gz 2>/dev/null; then
+        tar -xzf ptflow.tar.gz --strip-components=1
+        rm ptflow.tar.gz
+        return
+    fi
+    
+    print_warn "main 分支归档下载失败，尝试下载 master 分支源码归档..."
+    curl -fL "$ARCHIVE_MASTER_URL" -o ptflow.tar.gz 2>/dev/null || {
         print_error "下载失败，请检查网络连接"
         print_info "您也可以手动下载项目到 $INSTALL_DIR"
         exit 1

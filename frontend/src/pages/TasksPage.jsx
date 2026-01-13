@@ -47,7 +47,11 @@ function RssTaskCard({ task, rules, instanceName, onEdit, onDelete, onAddRule, o
             </p>
           </div>
         </div>
-        <div className={`px-2.5 py-1 rounded-full text-xs ${task.enabled ? 'bg-accent-500/20 text-accent-400' : 'bg-dark-800 text-dark-500'}`}>
+        <div
+          className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap leading-none ${
+            task.enabled ? 'bg-accent-500/20 text-accent-400' : 'bg-dark-800 text-dark-500'
+          }`}
+        >
           {task.enabled ? '运行中' : '已暂停'}
         </div>
       </div>
@@ -169,7 +173,11 @@ function DeleteTaskCard({ task, rules, instanceName, onEdit, onDelete, onAddRule
             <p className="text-xs text-dark-500 mt-0.5">实例: {instanceName || '-'}</p>
           </div>
         </div>
-        <div className={`px-2.5 py-1 rounded-full text-xs ${task.enabled ? 'bg-red-500/20 text-red-300' : 'bg-dark-800 text-dark-500'}`}>
+        <div
+          className={`px-2.5 py-1 rounded-full text-xs whitespace-nowrap leading-none ${
+            task.enabled ? 'bg-red-500/20 text-red-300' : 'bg-dark-800 text-dark-500'
+          }`}
+        >
           {task.enabled ? '运行中' : '已暂停'}
         </div>
       </div>
@@ -178,6 +186,10 @@ function DeleteTaskCard({ task, rules, instanceName, onEdit, onDelete, onAddRule
         <div className="flex items-center justify-between">
           <span className="text-dark-500">检查间隔</span>
           <span className="text-dark-300">{task.interval_minutes} 分钟</span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-dark-500">单次删种</span>
+          <span className="text-dark-300">{task.max_delete_count ? `${task.max_delete_count} 个` : '不限'}</span>
         </div>
         {task.last_run && (
           <div className="flex items-center gap-1 text-xs text-dark-500">
@@ -264,8 +276,8 @@ function DeleteTaskCard({ task, rules, instanceName, onEdit, onDelete, onAddRule
 
 function ModalShell({ title, onClose, children }) {
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-dark-900 border border-dark-800 rounded-2xl w-full max-w-lg my-4 max-h-[90vh] overflow-y-auto animate-in">
+    <div className="fixed inset-0 bg-black/60 flex items-start justify-center z-50 p-4 pt-8 pb-24 overflow-y-auto">
+      <div className="bg-dark-900 border border-dark-800 rounded-2xl w-full max-w-lg max-h-[calc(100vh-8rem)] overflow-y-auto animate-in">
         <div className="flex items-center justify-between p-4 border-b border-dark-800">
           <h3 className="font-semibold">{title}</h3>
           <button onClick={onClose} className="p-1 hover:bg-dark-800 rounded-lg">
@@ -348,7 +360,7 @@ function RssTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
 
   return (
     <ModalShell title={task ? '编辑RSS任务' : '添加RSS任务'} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <form onSubmit={handleSubmit} className="p-4 pb-10 space-y-4">
         <div>
           <label className="block text-sm text-dark-400 mb-2">任务名称 *</label>
           <input
@@ -526,7 +538,7 @@ function RssRuleModal({ isOpen, onClose, rule, onSubmit }) {
 
   return (
     <ModalShell title={rule ? '编辑RSS规则' : '添加RSS规则'} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <form onSubmit={handleSubmit} className="p-4 pb-10 space-y-4">
         <div>
           <label className="block text-sm text-dark-400 mb-2">规则名称 *</label>
           <input
@@ -621,6 +633,7 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
     name: '',
     qb_instance_id: '',
     interval_minutes: 60,
+    max_delete_count: 0,
     enabled: true
   })
   const [loading, setLoading] = useState(false)
@@ -632,6 +645,7 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
         name: task.name,
         qb_instance_id: task.qb_instance_id || '',
         interval_minutes: task.interval_minutes || 60,
+        max_delete_count: task.max_delete_count || 0,
         enabled: task.enabled
       })
     } else {
@@ -639,6 +653,7 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
         name: '',
         qb_instance_id: instances[0]?.id || '',
         interval_minutes: 60,
+        max_delete_count: 0,
         enabled: true
       })
     }
@@ -658,7 +673,8 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
     const payload = {
       ...form,
       qb_instance_id: parseInt(form.qb_instance_id, 10),
-      interval_minutes: parseInt(form.interval_minutes, 10)
+      interval_minutes: parseInt(form.interval_minutes, 10),
+      max_delete_count: parseInt(form.max_delete_count, 10) || 0
     }
     const result = await onSubmit(payload, task?.id)
     setLoading(false)
@@ -671,7 +687,7 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
 
   return (
     <ModalShell title={task ? '编辑删种任务' : '添加删种任务'} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <form onSubmit={handleSubmit} className="p-4 pb-10 space-y-4">
         <div>
           <label className="block text-sm text-dark-400 mb-2">任务名称 *</label>
           <input
@@ -705,6 +721,17 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
               min="1"
             />
           </div>
+        </div>
+        <div>
+          <label className="block text-sm text-dark-400 mb-2">单次删种数量</label>
+          <input
+            type="number"
+            value={form.max_delete_count}
+            onChange={(e) => setForm({ ...form, max_delete_count: e.target.value })}
+            className="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-xl text-dark-100"
+            min="0"
+            placeholder="0 表示不限"
+          />
         </div>
         <label className="flex items-center gap-2 cursor-pointer">
           <input
@@ -818,7 +845,7 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
 
   return (
     <ModalShell title={rule ? '编辑删种规则' : '添加删种规则'} onClose={onClose}>
-      <form onSubmit={handleSubmit} className="p-4 space-y-4">
+      <form onSubmit={handleSubmit} className="p-4 pb-10 space-y-4">
         <div>
           <label className="block text-sm text-dark-400 mb-2">规则名称 *</label>
           <input
@@ -1047,6 +1074,14 @@ export default function TasksPage() {
     fetchRssTasks()
     fetchDeleteTasks()
   }, [])
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      fetchRssTasks()
+      fetchDeleteTasks()
+    }, 30000)
+    return () => clearInterval(intervalId)
+  }, [fetchRssTasks, fetchDeleteTasks])
 
   useEffect(() => {
     rssTasks.forEach(task => {

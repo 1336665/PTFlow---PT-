@@ -9,6 +9,7 @@ export const useAuthStore = create(
       token: null,
       username: null,
       isAuthenticated: false,
+      hasHydrated: false,
       
       login: async (username, password) => {
         try {
@@ -34,12 +35,16 @@ export const useAuthStore = create(
         const { token } = get()
         if (token) {
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`
+          set({ isAuthenticated: true })
         }
       }
     }),
     {
       name: 'ptflow-auth',
-      partialize: (state) => ({ token: state.token, username: state.username, isAuthenticated: state.isAuthenticated })
+      partialize: (state) => ({ token: state.token, username: state.username, isAuthenticated: state.isAuthenticated }),
+      onRehydrateStorage: () => (state) => {
+        state?.setState({ hasHydrated: true })
+      }
     }
   )
 )

@@ -40,9 +40,28 @@ import requests
 # ════════════════════════════════════════════════════════════════════════════════
 
 VERSION = "1.0.0"
-JWT_SECRET = os.getenv("JWT_SECRET", secrets.token_hex(32))
 JWT_ALGORITHM = "HS256"
 DATABASE_PATH = os.getenv("DATABASE_PATH", "ptflow.db")
+
+def load_jwt_secret() -> str:
+    env_secret = os.getenv("JWT_SECRET")
+    if env_secret:
+        return env_secret
+
+    data_dir = os.path.dirname(DATABASE_PATH) or "."
+    secret_path = os.path.join(data_dir, "jwt_secret")
+
+    if os.path.exists(secret_path):
+        with open(secret_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    new_secret = secrets.token_hex(32)
+    os.makedirs(data_dir, exist_ok=True)
+    with open(secret_path, "w", encoding="utf-8") as f:
+        f.write(new_secret)
+    return new_secret
+
+JWT_SECRET = load_jwt_secret()
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger("ptflow")

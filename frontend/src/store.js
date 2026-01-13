@@ -17,7 +17,8 @@ export const useAuthStore = create(
           set({
             token: res.data.token,
             username: res.data.username,
-            isAuthenticated: true
+            isAuthenticated: true,
+            hasHydrated: true
           })
           api.defaults.headers.common['Authorization'] = `Bearer ${res.data.token}`
           return { success: true }
@@ -27,7 +28,7 @@ export const useAuthStore = create(
       },
       
       logout: () => {
-        set({ token: null, username: null, isAuthenticated: false })
+        set({ token: null, username: null, isAuthenticated: false, hasHydrated: true })
         delete api.defaults.headers.common['Authorization']
       },
       
@@ -37,6 +38,7 @@ export const useAuthStore = create(
           api.defaults.headers.common['Authorization'] = `Bearer ${token}`
           set({ isAuthenticated: true })
         }
+        set({ hasHydrated: true })
       }
     }),
     {

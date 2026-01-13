@@ -265,7 +265,7 @@ function DeleteTaskCard({ task, rules, instanceName, onEdit, onDelete, onAddRule
 function ModalShell({ title, onClose, children }) {
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 overflow-y-auto">
-      <div className="bg-dark-900 border border-dark-800 rounded-2xl w-full max-w-lg my-8 animate-in">
+      <div className="bg-dark-900 border border-dark-800 rounded-2xl w-full max-w-lg my-4 max-h-[90vh] overflow-y-auto animate-in">
         <div className="flex items-center justify-between p-4 border-b border-dark-800">
           <h3 className="font-semibold">{title}</h3>
           <button onClick={onClose} className="p-1 hover:bg-dark-800 rounded-lg">
@@ -369,7 +369,7 @@ function RssTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
                        text-dark-100 placeholder-dark-500 focus:border-accent-500"
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-dark-400 mb-2">下载实例 *</label>
             <select
@@ -394,7 +394,7 @@ function RssTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-dark-400 mb-2">保存路径</label>
             <input
@@ -554,7 +554,7 @@ function RssRuleModal({ isOpen, onClose, rule, onSubmit }) {
             className="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-xl text-dark-100"
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-dark-400 mb-2">覆盖保存路径</label>
             <input
@@ -681,7 +681,7 @@ function DeleteTaskModal({ isOpen, onClose, task, instances, onSubmit }) {
             className="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-xl text-dark-100"
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-dark-400 mb-2">实例 *</label>
             <select
@@ -828,7 +828,7 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
             className="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-xl text-dark-100"
           />
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-dark-400 mb-2">最小分享率</label>
             <input
@@ -850,7 +850,7 @@ function DeleteRuleModal({ isOpen, onClose, rule, onSubmit }) {
             />
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-sm text-dark-400 mb-2">最小上传(GB)</label>
             <input

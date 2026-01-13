@@ -542,11 +542,17 @@ class Database:
             name TEXT NOT NULL,
             qb_instance_id INTEGER NOT NULL,
             interval_minutes INTEGER DEFAULT 60,
+            max_delete_count INTEGER DEFAULT 0,
             enabled INTEGER DEFAULT 1,
             last_run REAL,
             created_at REAL,
             FOREIGN KEY (qb_instance_id) REFERENCES qb_instances(id)
         )''')
+
+        try:
+            c.execute('ALTER TABLE delete_tasks ADD COLUMN max_delete_count INTEGER DEFAULT 0')
+        except sqlite3.OperationalError:
+            pass
 
         # 删种规则表
         c.execute('''CREATE TABLE IF NOT EXISTS delete_task_rules (
@@ -740,12 +746,14 @@ class DeleteTaskCreate(BaseModel):
     name: str
     qb_instance_id: int
     interval_minutes: int = 60
+    max_delete_count: int = 0
     enabled: bool = True
 
 class DeleteTaskUpdate(BaseModel):
     name: Optional[str] = None
     qb_instance_id: Optional[int] = None
     interval_minutes: Optional[int] = None
+    max_delete_count: Optional[int] = None
     enabled: Optional[bool] = None
 
 class DeleteTaskRuleCreate(BaseModel):
@@ -1554,27 +1562,27 @@ class DeleteManager:
                 self._check_tasks()
             except Exception as e:
                 logger.error(f"删种检查异常: {e}")
-            self._stop_event.wait(300)
+            self._stop_event.wait(60)
 
     def _check_tasks(self):
         conn = db.get_conn()
         c = conn.cursor()
-        c.execute('''SELECT id, name, qb_instance_id, interval_minutes, enabled, last_run
+        c.execute('''SELECT id, name, qb_instance_id, interval_minutes, max_delete_count, enabled, last_run
                     FROM delete_tasks WHERE enabled = 1''')
         tasks = c.fetchall()
         conn.close()
 
         for task in tasks:
-            task_id, name, qb_id, interval_minutes, enabled, last_run = task
+            task_id, name, qb_id, interval_minutes, max_delete_count, enabled, last_run = task
             if last_run and interval_minutes:
                 if time.time() - last_run < interval_minutes * 60:
                     continue
             try:
-                self._process_task(task_id, qb_id)
+                self._process_task(task_id, qb_id, max_delete_count)
             except Exception as e:
                 logger.error(f"处理删种任务 {name} 失败: {e}")
 
-    def _process_task(self, task_id: int, qb_id: int):
+    def _process_task(self, task_id: int, qb_id: int, max_delete_count: int):
         conn = db.get_conn()
         c = conn.cursor()
         c.execute('''SELECT id, name, min_ratio, min_seeding_hours, min_uploaded_gb, max_size_gb,
@@ -1584,11 +1592,14 @@ class DeleteManager:
         conn.close()
 
         torrents = qb_manager.get_torrents(qb_id)
+        deleted = 0
         for rule in rules:
             (rule_id, name, min_ratio, min_hours, min_uploaded_gb, max_size_gb,
              include_categories, exclude_categories, include_tags, exclude_tags,
              conditions_json, delete_files) = rule
             for torrent in torrents:
+                if max_delete_count and deleted >= max_delete_count:
+                    break
                 if not self._match_delete_rule(
                     torrent,
                     min_ratio,
@@ -1608,6 +1619,9 @@ class DeleteManager:
                     'delete',
                     delete_files=bool(delete_files)
                 )
+                deleted += 1
+            if max_delete_count and deleted >= max_delete_count:
+                break
         conn = db.get_conn()
         c = conn.cursor()
         c.execute('UPDATE delete_tasks SET last_run = ? WHERE id = ?', (time.time(), task_id))
@@ -2382,7 +2396,7 @@ async def preview_rss_feed(feed_id: int, username: str = Depends(verify_token)):
 async def get_delete_tasks(username: str = Depends(verify_token)):
     conn = db.get_conn()
     c = conn.cursor()
-    c.execute('''SELECT id, name, qb_instance_id, interval_minutes, enabled, last_run, created_at
+    c.execute('''SELECT id, name, qb_instance_id, interval_minutes, max_delete_count, enabled, last_run, created_at
                 FROM delete_tasks''')
     rows = c.fetchall()
     conn.close()
@@ -2391,9 +2405,10 @@ async def get_delete_tasks(username: str = Depends(verify_token)):
         'name': r[1],
         'qb_instance_id': r[2],
         'interval_minutes': r[3],
-        'enabled': bool(r[4]),
-        'last_run': r[5],
-        'created_at': r[6]
+        'max_delete_count': r[4],
+        'enabled': bool(r[5]),
+        'last_run': r[6],
+        'created_at': r[7]
     } for r in rows]
 
 
@@ -2401,9 +2416,10 @@ async def get_delete_tasks(username: str = Depends(verify_token)):
 async def create_delete_task(req: DeleteTaskCreate, username: str = Depends(verify_token)):
     conn = db.get_conn()
     c = conn.cursor()
-    c.execute('''INSERT INTO delete_tasks (name, qb_instance_id, interval_minutes, enabled, created_at)
-                VALUES (?, ?, ?, ?, ?)''',
-              (req.name, req.qb_instance_id, req.interval_minutes, 1 if req.enabled else 0, time.time()))
+    c.execute('''INSERT INTO delete_tasks (name, qb_instance_id, interval_minutes, max_delete_count, enabled, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)''',
+              (req.name, req.qb_instance_id, req.interval_minutes, req.max_delete_count,
+               1 if req.enabled else 0, time.time()))
     task_id = c.lastrowid
     conn.commit()
     conn.close()
